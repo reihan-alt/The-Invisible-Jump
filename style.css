@@ -1,0 +1,40 @@
+/* CSS In-Line */
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Consolas', monospace;
+    background-color: #1a1a2e; /* Dark Purple-Blue */
+    color: #e0e0e0;
+    margin: 0;
+    padding-top: 20px;
+}
+h1 {
+    color: #FFD700; /* Emas */
+    margin-bottom: 5px;
+    font-size: 2.5em;
+    text-shadow: 0 0 10px #FFD700;
+}
+#levelDisplay {
+    color: #a0f0ff;
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+#gameCanvas {
+    border: 5px solid #FFD700;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+    background-color: #0f0f1a; /* Latar belakang sangat gelap */
+    display: block;
+}
+#message {
+    margin-top: 15px;
+    font-weight: bold;
+    font-size: 1.2em;
+}
+.controls {
+    margin-top: 10px;
+    color: #a0a0a0;
+}
+.controls strong {
+    color: #fff;
+}

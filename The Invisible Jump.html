@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Invisible Jump (Platformer Lanjutan)</title>
+    <style>
+        /* CSS In-Line */
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Consolas', monospace;
+            background-color: #1a1a2e; /* Dark Purple-Blue */
+            color: #e0e0e0;
+            margin: 0;
+            padding-top: 20px;
+        }
+        h1 {
+            color: #FFD700; /* Emas */
+            margin-bottom: 5px;
+            font-size: 2.5em;
+            text-shadow: 0 0 10px #FFD700;
+        }
+        #levelDisplay {
+            color: #a0f0ff;
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+        #gameCanvas {
+            border: 5px solid #FFD700;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+            background-color: #0f0f1a; /* Latar belakang sangat gelap */
+            display: block;
+        }
+        #message {
+            margin-top: 15px;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        .controls {
+            margin-top: 10px;
+            color: #a0a0a0;
+        }
+        .controls strong {
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚫ The Invisible Jump ⚫</h1>
+    <div id="levelDisplay">Level 1</div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div id="message" style="color: #4CAF50;">Tekan Atas (⬆️) untuk melompat dan melihat platform!</div>
+    <div class="controls">Gunakan **⬅️ Kiri**, **➡️ Kanan**, dan **⬆️ Atas** untuk bergerak.</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageDiv = document.getElementById('message');
+        const levelDisplayDiv = document.getElementById('levelDisplay');
+
+        let gameLoopId;
+        let gameOver = false;
+        let platformVisibleTimer = 0;
+        const PLATFORM_VISIBILITY_DURATION = 35; // Sekitar 0.6 detik
+        let currentLevel = 1;
+
+        // --- Karakter (Pixel Hero - Diamond) ---
+        const player = {
+            x: 50, y: 0, width: 25, height: 25,
+            color: '#4CC9F0', // Warna Dasar: Light Cyan/Blue
+            activeColor: '#FF5733', // Warna Aktif (saat melompat): Orange-Red
+            currentColor: '#4CC9F0',
+            speed: 5, velocityY: 0, gravity: 0.5, jumpStrength: 10,
+            isGrounded: false
+        };
+        
+        // --- Definisi Level ---
+        // Type: 0=Ground (Selalu Terlihat), 1=Invisible Platform, 2=Spikes/Jebakan
+        const levels = [
+            // LEVEL 1: Dasar Lompatan dan Spikes
+            [
+                // Tanah Utama
+                [0, canvas.height - 20, canvas.width, 20, 0], 
+                // Platform Tersembunyi
+                [150, canvas.height - 80, 80, 10, 1],
+                [300, canvas.height - 120, 80, 10, 1],
+                // Spikes sebelum Platform Terakhir
+                [420, canvas.height - 20, 100, 20, 2],
+                // Platform Tersembunyi Tinggi
+                [550, canvas.height - 180, 100, 10, 1], 
+            ],
+            // LEVEL 2: Uji Jarak dan Jeda
+            [
+                [0, canvas.height - 20, 150, 20, 0], // Tanah Awal
+                [250, canvas.height - 80, 50, 10, 1], // Jarak jauh 1
+                [380, canvas.height - 150, 50, 10, 1], // Jarak tinggi 2
+                [500, canvas.height - 80, 50, 10, 1], // Jarak jauh 3
+                [650, canvas.height - 180, 100, 20, 0], // Platform Aman di Akhir
+                // Jebakan di bawah platform aman
+                [600, canvas.height - 20, 100, 20, 2],
+            ],
+            // LEVEL 3: Uji Akurasi & Spikes Terbang
+            [
+                [0, canvas.height - 20, 150, 20, 0], 
+                [150, canvas.height - 120, 50, 10, 1], // Naik
+                [300, canvas.height - 120, 50, 10, 2], // Spikes Terbang
+                [450, canvas.height - 120, 50, 10, 1], // Naik lagi
+                [600, canvas.height - 200, 150, 20, 0], // Platform Tinggi Aman
+            ]
+        ];
+        
+        // --- Target Finis ---
+        const finishLine = {
+            x: canvas.width - 50, y: canvas.height - 100, width: 20, height: 80, color: '#33cc33'
+        };
+
+        const keys = { right: false, left: false, up: false };
+
+        // ====================================================================
+        // FUNGSI GAMBAR ESTETIK DAN TAMBAHAN
+        // ====================================================================
+
+        function drawPlayer() {
+            // Pemain berubah warna sebentar saat visibilitas platform di-trigger
+            player.currentColor = platformVisibleTimer > PLATFORM_VISIBILITY_DURATION - 5 ? player.activeColor : player.color;
+            ctx.fillStyle = player.currentColor;
+            
+            // Menggambar karakter sebagai bentuk Diamond/Belah Ketupat
+            ctx.beginPath();
+            const cx = player.x + player.width / 2;
+            const cy = player.y + player.height / 2;
+            ctx.moveTo(cx, player.y); // Atas
+            ctx.lineTo(player.x + player.width, cy); // Kanan
+            ctx.lineTo(cx, player.y + player.height); // Bawah
+            ctx.lineTo(player.x, cy); // Kiri
+            ctx.closePath();
+            ctx.fill();
+            
+            // Efek cahaya
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawPlatform(p) {
+            const [x, y, w, h, type] = p;
+            
+            if (type === 0) {
+                // Ground: Tekstur Batu/Bumi
+                ctx.fillStyle = '#654321'; 
+                ctx.fillRect(x, y, w, h);
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(x, y, w, 3);
+            } else if (type === 1) {
+                // Platform Tersembunyi: Tembus pandang saat terlihat
+                const isVisible = platformVisibleTimer > 0;
+
+                // **FITUR BARU: Efek Kabut (Fog Effect)**
+                if (!isVisible) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; // Bayangan sangat samar
+                    ctx.fillRect(x, y, w, h);
+                    // Tambahkan garis samar di atas
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                    ctx.fillRect(x, y, w, 1);
+                } else {
+                    // Platform Terlihat
+                    ctx.fillStyle = 'rgba(170, 255, 255, 0.7)'; 
+                    ctx.fillRect(x, y, w, h);
+                }
+            } else if (type === 2) {
+                // Spikes: Berbentuk segitiga
+                ctx.fillStyle = 'darkred'; 
+                ctx.fillRect(x, y, w, h);
+                
+                ctx.fillStyle = '#ff0000';
+                const spikeCount = Math.floor(w / 15);
+                for (let i = 0; i < spikeCount; i++) {
+                    const sx = x + i * (w / spikeCount);
+                    ctx.beginPath();
+                    ctx.moveTo(sx, y + h); 
+                    ctx.lineTo(sx + (w / spikeCount) / 2, y); 
+                    ctx.lineTo(sx + (w / spikeCount), y + h); 
+                    ctx.fill();
+                }
+            }
+        }
+        
+        function drawPlatforms() {
+            // Filter dan gambar platform type 1 (agar terpisah dan bisa digambar dua kali)
+            const invisiblePlatforms = levels[currentLevel - 1].filter(p => p[4] === 1);
+            const visiblePlatforms = levels[currentLevel - 1].filter(p => p[4] !== 1);
+
+            // 1. Gambar platform yang selalu terlihat (Ground, Spikes)
+            visiblePlatforms.forEach(drawPlatform);
+
+            // 2. Gambar platform yang tersembunyi
+            invisiblePlatforms.forEach(drawPlatform);
+            
+            // Gambar Garis Finis
+            ctx.fillStyle = '#33cc33'; 
+            ctx.fillRect(finishLine.x, finishLine.y, finishLine.width, finishLine.height);
+            // Bendera
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(finishLine.x + finishLine.width - 5, finishLine.y, 5, finishLine.height - 20);
+            ctx.fillStyle = '#33cc33';
+            ctx.beginPath();
+            ctx.moveTo(finishLine.x + finishLine.width - 5, finishLine.y);
+            ctx.lineTo(finishLine.x, finishLine.y + 10);
+            ctx.lineTo(finishLine.x + finishLine.width - 5, finishLine.y + 20);
+            ctx.fill();
+        }
+
+        // ====================================================================
+        // FUNGSI UTAMA GAMEPLAY
+        // ====================================================================
+
+        function init() {
+            // Reset posisi pemain
+            player.y = canvas.height - 20 - player.height;
+            player.x = 50;
+            player.velocityY = 0;
+            gameOver = false;
+            platformVisibleTimer = 0;
+            player.currentColor = player.color; // Reset warna pemain
+            levelDisplayDiv.textContent = `Level ${currentLevel}`;
+            messageDiv.textContent = 'Tekan Atas (⬆️) untuk melompat dan melihat platform!';
+            messageDiv.style.color = '#4CAF50';
+            
+            canvas.onclick = null;
+            document.removeEventListener('keydown', handleRestartKey); 
+            document.addEventListener('keydown', handleGameKeys);
+            
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            gameLoopId = requestAnimationFrame(update);
+        }
+
+        function nextLevel() {
+            if (currentLevel < levels.length) {
+                currentLevel++;
+                // Atur posisi garis finis untuk level baru
+                finishLine.y = currentLevel === 3 ? canvas.height - 200 - finishLine.height + 20 : canvas.height - 100;
+                finishLine.x = currentLevel === 3 ? canvas.width - 80 : canvas.width - 50;
+
+                init();
+            } else {
+                endGame("🎉 SELAMAT! Kamu Menamatkan Semua Level! 🎉", 'gold');
+            }
+        }
+        
+        function checkCollision(obj1, obj2) {
+            return obj1.x < obj2.x + obj2.width &&
+                   obj1.x + obj1.width > obj2.x &&
+                   obj1.y < obj2.y + obj2.height &&
+                   obj1.y + obj1.height > obj2.y;
+        }
+        
+        function update() {
+            if (gameOver) return;
+
+            ctx.fillStyle = '#0f0f1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height); 
+
+            if (platformVisibleTimer > 0) {
+                platformVisibleTimer--;
+            }
+
+            // Fisika & Gerakan
+            player.velocityY += player.gravity;
+            player.y += player.velocityY;
+
+            if (keys.right) player.x += player.speed;
+            if (keys.left) player.x -= player.speed;
+            player.x = Math.max(0, Math.min(player.x, canvas.width - player.width));
+
+            // Deteksi Tabrakan
+            player.isGrounded = false;
+            const currentLevelData = levels[currentLevel - 1];
+            currentLevelData.forEach(p => {
+                const [x, y, w, h, type] = p;
+                const platform = {x: x, y: y, width: w, height: h};
+                
+                if (checkCollision(player, platform)) {
+                    
+                    if (type === 2) { 
+                        endGame("Game Over! Kena Jebakan Berbahaya!", 'red');
+                        return;
+                    }
+
+                    // Pendaratan
+                    if (player.velocityY >= 0 && player.y + player.height - player.velocityY <= platform.y + 5) {
+                        player.y = platform.y - player.height; 
+                        player.velocityY = 0;
+                        player.isGrounded = true;
+                    } 
+                    // Tabrakan Kepala
+                    else if (player.velocityY < 0) {
+                        player.velocityY = 0; 
+                        player.y = platform.y + platform.height; 
+                    }
+                }
+            });
+
+            // Lompatan
+            if (keys.up && player.isGrounded) {
+                player.velocityY = -player.jumpStrength;
+                player.isGrounded = false; 
+                platformVisibleTimer = PLATFORM_VISIBILITY_DURATION; // Aktifkan visibilitas
+            }
+            
+            // Cek Game Over (Jatuh)
+            if (player.y > canvas.height) { 
+                endGame("Game Over! Jatuh ke kehampaan!", 'red');
+                return;
+            }
+            
+            // Cek Kemenangan Level
+            if (checkCollision(player, finishLine)) {
+                if (currentLevel < levels.length) {
+                    messageDiv.textContent = `Level ${currentLevel} Selesai! Klik/ENTER untuk Level ${currentLevel + 1}.`;
+                    messageDiv.style.color = 'lime';
+                    gameOver = true;
+                    canvas.onclick = nextLevel;
+                    document.addEventListener('keydown', handleRestartKey); 
+                } else {
+                    nextLevel(); // Panggil fungsi nextLevel untuk Win Screen
+                }
+                return;
+            }
+
+            // Gambar Ulang
+            drawPlatforms();
+            drawPlayer();
+
+            gameLoopId = requestAnimationFrame(update);
+        }
+
+        function endGame(text, color) {
+            gameOver = true;
+            messageDiv.textContent = text + " (Klik atau tekan ENTER untuk coba lagi)";
+            messageDiv.style.color = color;
+            canvas.onclick = init; 
+            document.addEventListener('keydown', handleRestartKey); 
+        }
+        
+        // ====================================================================
+        // INPUT USER & HANDLER
+        // ====================================================================
+        
+        function handleRestartKey(e) {
+             if (e.code === 'Enter') {
+                if (currentLevel < levels.length && checkCollision(player, finishLine)) {
+                    nextLevel(); 
+                } else {
+                    init(); 
+                }
+                return;
+            }
+        }
+        
+        function handleGameKeys(e) {
+            if (gameOver) return;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowUp') keys.up = true;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameOver && e.code === 'Enter') {
+                handleRestartKey(e);
+                return;
+            }
+            if (gameOver) return;
+
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowUp') keys.up = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowRight') keys.right = false;
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowUp') keys.up = false;
+        });
+        
+        // Mencegah scroll
+        document.addEventListener('keydown', (e) => {
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+        }, false);
+        
+
+        // Mulai Game
+        init();
+    </script>
+</body>
+</html>
